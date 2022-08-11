@@ -123,6 +123,8 @@ Config GetConfig() {
 
 // Computes the detection metrics.
 void Compute(const std::string& pd_str, const std::string& gt_str) {
+  std::time_t t1 = std::time(0);
+  std::cout<<"Multi-thread version modified by Lue Fan from commit 17f070076dad149766357b31e25d27cf8b5da6ac"<<std::endl;
   Objects pd_objects;
   if (!pd_objects.ParseFromString(pd_str)) {
     std::cerr << "Failed to parse predictions.";
@@ -210,6 +212,8 @@ void Compute(const std::string& pd_str, const std::string& gt_str) {
               << " [mAPH " << metric.mean_average_precision_ha_weighted()
               << "]\n";
   }
+  std::time_t t2 = std::time(0);
+  std::cout<<"Eval Using "<<t2 - t1<<"s"<<std::endl;
 }
 
 }  // namespace

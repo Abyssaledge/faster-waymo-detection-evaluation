@@ -1,0 +1,11 @@
+build -c opt
+build --cxxopt="-std=c++11"
+build --auto_output_filter=subpackages
+build --copt="-Wall" --copt="-Wno-sign-compare"
+build --linkopt="-lrt -lm"
+build --action_env TF_HEADER_DIR="/root/.pyenv/versions/3.6.8/lib/python3.6/site-packages/tensorflow/include"
+build --action_env TF_SHARED_LIBRARY_DIR="/root/.pyenv/versions/3.6.8/lib/python3.6/site-packages/tensorflow"
+build --action_env TF_SHARED_LIBRARY_NAME="libtensorflow_framework.so.2"
+build --action_env TF_NEED_CUDA="0"
+build:manylinux2010 --crosstool_top=//third_party/toolchains/preconfig/ubuntu16.04/gcc7_manylinux2010-nvcc-cuda10.0:toolchain
+build --cxxopt="-D_GLIBCXX_USE_CXX11_ABI=0"

@@ -20,6 +20,8 @@ limitations under the License.
 #include <memory>
 #include <string>
 #include <utility>
+#include <thread>
+#include <functional>
 
 #include <glog/logging.h>
 #include "waymo_open_dataset/label.pb.h"
@@ -395,6 +397,78 @@ std::vector<DetectionMeasurements> ComputeDetectionMeasurements(
   return measurements;
 }
 
+// std::vector<DetectionMetrics> ComputeDetectionMetrics(
+//     const Config& config, const std::vector<std::vector<Object>>& pds,
+//     const std::vector<std::vector<Object>>& gts,
+//     ComputeIoUFunc custom_iou_func) {
+//   std::vector<DetectionMeasurements> measurements;
+//   CHECK_EQ(pds.size(), gts.size());
+//   const int num_frames = pds.size();
+//   const Config config_copy = config.score_cutoffs_size() > 0
+//                                  ? config
+//                                  : EstimateScoreCutoffs(config, pds, gts);
+//   for (int i = 0; i < num_frames; ++i) {
+//     if (i == 0) {
+//       measurements = ComputeDetectionMeasurements(config_copy, pds[i], gts[i],
+//                                                   custom_iou_func);
+//     } else {
+//       MergeDetectionMeasurementsVector(
+//           ComputeDetectionMeasurements(config_copy, pds[i], gts[i],
+//                                        custom_iou_func),
+//           &measurements);
+//     }
+//   }
+//   std::vector<DetectionMetrics> metrics;
+//   metrics.reserve(measurements.size());
+//   for (auto& m : measurements) {
+//     metrics.emplace_back(ToDetectionMetrics(config, std::move(m),
+//                                             config.desired_recall_delta()));
+//   }
+//   return metrics;
+// }
+
+void ComputeMeasurementsPerThread(
+    const Config& config, const std::vector<std::vector<Object>>& pds,
+    const std::vector<std::vector<Object>>& gts,
+    ComputeIoUFunc custom_iou_func,
+    int left, int right, int t_id,
+    std::vector<std::vector<DetectionMeasurements>>* m_list
+    ) {
+
+    std::vector<DetectionMeasurements> measurements;
+    for(int idx = left; idx < right; idx++){
+      if(idx == left){
+        measurements = ComputeDetectionMeasurements(std::cref(config), std::cref(pds[idx]), std::cref(gts[idx]), custom_iou_func);
+      }
+      else{
+        MergeDetectionMeasurementsVector(
+          ComputeDetectionMeasurements(std::cref(config), std::cref(pds[idx]), std::cref(gts[idx]), custom_iou_func),
+          &measurements);
+      }
+    }
+    (*m_list)[t_id] = measurements;
+
+}
+
+std::vector<DetectionMetrics> MergeDetectionMeasurementsToMetrics(
+    const Config& config,
+    std::vector<std::vector<DetectionMeasurements>>& measurements) {
+  const int num_frames = measurements.size();
+  if (measurements.empty()) return {};
+  std::vector<DetectionMeasurements> measurements_merged = measurements[0];
+  for (int i = 1; i < num_frames; ++i) {
+    MergeDetectionMeasurementsVector(measurements[i], &measurements_merged);
+  }
+  std::vector<DetectionMetrics> metrics;
+  metrics.reserve(measurements_merged.size());
+  for (auto& m : measurements_merged) {
+    metrics.emplace_back(ToDetectionMetrics(config, std::move(m),
+                                            config.desired_recall_delta()));
+  }
+  return metrics;
+}
+
+// new multi-thread version
 std::vector<DetectionMetrics> ComputeDetectionMetrics(
     const Config& config, const std::vector<std::vector<Object>>& pds,
     const std::vector<std::vector<Object>>& gts,
@@ -405,25 +479,26 @@ std::vector<DetectionMetrics> ComputeDetectionMetrics(
   const Config config_copy = config.score_cutoffs_size() > 0
                                  ? config
                                  : EstimateScoreCutoffs(config, pds, gts);
-  for (int i = 0; i < num_frames; ++i) {
-    if (i == 0) {
-      measurements = ComputeDetectionMeasurements(config_copy, pds[i], gts[i],
-                                                  custom_iou_func);
-    } else {
-      MergeDetectionMeasurementsVector(
-          ComputeDetectionMeasurements(config_copy, pds[i], gts[i],
-                                       custom_iou_func),
-          &measurements);
-    }
+
+  std::vector<std::vector<DetectionMeasurements>> measurement_list;
+
+  int thread_num = 64;
+
+  measurement_list.resize(thread_num);
+  std::vector<std::thread> threads(thread_num);
+  int per_len = (num_frames - 1) / thread_num + 1; // up div
+  for(int idx = 0; idx < thread_num; idx++){
+    int left = std::min(per_len * idx, num_frames);
+    int right = std::min(per_len * (idx + 1), num_frames);
+    threads[idx] = std::thread(&ComputeMeasurementsPerThread, std::cref(config_copy), std::cref(pds), std::cref(gts), custom_iou_func, left, right, idx, &measurement_list);
   }
-  std::vector<DetectionMetrics> metrics;
-  metrics.reserve(measurements.size());
-  for (auto& m : measurements) {
-    metrics.emplace_back(ToDetectionMetrics(config, std::move(m),
-                                            config.desired_recall_delta()));
-  }
+  std::for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
+  std::vector<DetectionMetrics>metrics = MergeDetectionMeasurementsToMetrics(config, measurement_list);
   return metrics;
+
 }
+
+
 
 std::vector<DetectionMetrics> ComputeDetectionMetrics(
     const Config& config,
