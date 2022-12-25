@@ -19,6 +19,7 @@ limitations under the License.
 #include <iterator>
 #include <memory>
 #include <utility>
+#include <thread>
 
 #include <glog/logging.h>
 #include "waymo_open_dataset/metrics/breakdown_generator.h"
@@ -263,6 +264,67 @@ std::vector<TrackingMetrics> ComputeTrackingMetrics(
   return metrics;
 }
 
+void ComputeTrackingMeasurementsPerThread(
+    const Config& config,
+    const std::vector<std::vector<std::vector<Object>>>& pds,
+    const std::vector<std::vector<std::vector<Object>>>& gts,
+    int left, int right, int t_id,
+    std::vector<std::vector<TrackingMeasurements>>* m_list
+    ) {
+
+
+  std::vector<TrackingMeasurements> measurements;
+  for (int scene_idx = left; scene_idx < right; ++scene_idx) {
+    MergeTrackingMeasurementsVector(
+        ComputeTrackingMeasurements(std::cref(config), std::cref(pds[scene_idx]), std::cref(gts[scene_idx])),
+        &measurements);
+  }
+  (*m_list)[t_id] = measurements;
+}
+
+std::vector<TrackingMetrics> MergeTrackingMeasurementsToMetrics(
+    const Config& config,
+    std::vector<std::vector<TrackingMeasurements>>& measurements) {
+  const int num_threads = measurements.size();
+  if (measurements.empty()) return {};
+  std::vector<TrackingMeasurements> measurements_merged = measurements[0];
+  for (int i = 1; i < num_threads; ++i) {
+    MergeTrackingMeasurementsVector(measurements[i], &measurements_merged);
+  }
+  std::vector<TrackingMetrics> metrics;
+  metrics.reserve(measurements_merged.size());
+  for (auto& m : measurements_merged) {
+    metrics.emplace_back(ToTrackingMetrics(std::move(m)));
+  }
+  return metrics;
+}
+
+// std::vector<TrackingMetrics> ComputeTrackingMetrics(
+//     const Config& config,
+//     const std::vector<std::vector<std::vector<Object>>>& pds,
+//     const std::vector<std::vector<std::vector<Object>>>& gts) {
+//   const int num_scenes = pds.size();
+//   const Config config_copy = config.score_cutoffs_size() > 0
+//                                  ? config
+//                                  : EstimateScoreCutoffs(config, pds, gts);
+
+//   std::vector<TrackingMeasurements> measurements;
+//   for (int scene_idx = 0; scene_idx < num_scenes; ++scene_idx) {
+//     MergeTrackingMeasurementsVector(
+//         ComputeTrackingMeasurements(config_copy, pds[scene_idx],
+//                                     gts[scene_idx]),
+//         &measurements);
+//   }
+//   std::vector<TrackingMetrics> metrics;
+//   metrics.reserve(measurements.size());
+//   for (auto& m : measurements) {
+//     metrics.emplace_back(ToTrackingMetrics(std::move(m)));
+//   }
+//   return metrics;
+// }
+
+
+// multi_thread version
 std::vector<TrackingMetrics> ComputeTrackingMetrics(
     const Config& config,
     const std::vector<std::vector<std::vector<Object>>>& pds,
@@ -271,21 +333,25 @@ std::vector<TrackingMetrics> ComputeTrackingMetrics(
   const Config config_copy = config.score_cutoffs_size() > 0
                                  ? config
                                  : EstimateScoreCutoffs(config, pds, gts);
+  std::vector<std::vector<TrackingMeasurements>> measurement_list;
 
-  std::vector<TrackingMeasurements> measurements;
-  for (int scene_idx = 0; scene_idx < num_scenes; ++scene_idx) {
-    MergeTrackingMeasurementsVector(
-        ComputeTrackingMeasurements(config_copy, pds[scene_idx],
-                                    gts[scene_idx]),
-        &measurements);
+  int thread_num = 64;
+
+  measurement_list.resize(thread_num);
+  std::vector<std::thread> threads(thread_num);
+  int per_len = (num_scenes - 1) / thread_num + 1; // up div
+  for(int idx = 0; idx < thread_num; idx++){
+    int left = std::min(per_len * idx, num_scenes);
+    int right = std::min(per_len * (idx + 1), num_scenes);
+    threads[idx] = std::thread(&ComputeTrackingMeasurementsPerThread, std::cref(config_copy), std::cref(pds), std::cref(gts), left, right, idx, &measurement_list);
   }
-  std::vector<TrackingMetrics> metrics;
-  metrics.reserve(measurements.size());
-  for (auto& m : measurements) {
-    metrics.emplace_back(ToTrackingMetrics(std::move(m)));
-  }
+  std::for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
+  std::vector<TrackingMetrics> metrics = MergeTrackingMeasurementsToMetrics(config, measurement_list);
   return metrics;
+
 }
+
+
 
 Config EstimateScoreCutoffs(
     const Config& config,
