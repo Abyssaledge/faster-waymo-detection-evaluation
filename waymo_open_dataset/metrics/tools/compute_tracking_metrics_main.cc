@@ -180,6 +180,10 @@ void Compute(const std::string& pd_str, const std::string& gt_str) {
               << " [MOTP " << metric.motp() << "]"
               << " [Miss " << metric.miss() << "]"
               << " [Mismatch " << metric.mismatch() << "]"
+              << " [EarlyTerm " << metric.early_t() << "]"
+              << " [WrongAsso " << metric.wrong_asso() << "]"
+              << " [LateTerm " << metric.late_t() << "]"
+              << " [GTs " << metric.num_gts() << "]"
               << " [FP " << metric.fp() << "]\n";
   }
 }

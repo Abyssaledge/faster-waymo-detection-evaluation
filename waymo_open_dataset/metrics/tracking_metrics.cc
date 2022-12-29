@@ -100,6 +100,9 @@ TrackingMeasurement MergeTrackingMeasurement(const TrackingMeasurement& m1,
   ADD_FIELD(num_misses);
   ADD_FIELD(num_fps);
   ADD_FIELD(num_mismatches);
+  ADD_FIELD(early_t);
+  ADD_FIELD(wrong_asso);
+  ADD_FIELD(late_t);
   ADD_FIELD(matching_cost);
   ADD_FIELD(num_matches);
   ADD_FIELD(num_objects_gt);
@@ -161,6 +164,11 @@ TrackingMetrics ToTrackingMetrics(TrackingMeasurements&& measurements) {
   float mota = 0.0;
   float motp = 0.0;
 
+  int early_t = 0.0;
+  int wrong_asso = 0.0;
+  int late_t = 0.0;
+  int out_num_gts = 0.0;
+
   // Find the score cutoff that yields best MOTA.
   for (const auto& measurement : m.measurements()) {
     if (measurement.num_objects_gt() == 0) continue;
@@ -169,6 +177,11 @@ TrackingMetrics ToTrackingMetrics(TrackingMeasurements&& measurements) {
     fp_ratio = measurement.num_fps() / num_objects_gt;
     mismatch_ratio = measurement.num_mismatches() / num_objects_gt;
     mota = 1.0 - (miss_ratio + fp_ratio + mismatch_ratio);
+
+    out_num_gts = num_objects_gt;
+    early_t = measurement.early_t();
+    wrong_asso = measurement.wrong_asso();
+    late_t = measurement.late_t();
 
     // "<" means that we prefer lower score cutoffs when MOTA ties.
     if (metrics.mota() < mota) {
@@ -183,6 +196,11 @@ TrackingMetrics ToTrackingMetrics(TrackingMeasurements&& measurements) {
       metrics.set_mismatch(mismatch_ratio);
       metrics.set_fp(fp_ratio);
       metrics.set_score_cutoff(measurement.score_cutoff());
+
+      metrics.set_early_t(early_t);
+      metrics.set_wrong_asso(wrong_asso);
+      metrics.set_late_t(late_t);
+      metrics.set_num_gts(out_num_gts);
     }
   }
   return metrics;

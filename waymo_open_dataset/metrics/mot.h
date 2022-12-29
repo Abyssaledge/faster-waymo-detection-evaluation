@@ -17,6 +17,7 @@ limitations under the License.
 #define WAYMO_OPEN_DATASET_METRICS_MOT_H_
 
 #include <string>
+#include <tuple>
 
 #include "absl/container/flat_hash_map.h"
 #include "waymo_open_dataset/label.pb.h"
@@ -112,7 +113,7 @@ class MOT final {
 
   // Computes the number of mismatches by comparing the new matching and
   // matching from last frame.
-  int ComputeNumMismatches(
+  std::tuple<int, int, int, int> ComputeNumMismatches(
       const absl::flat_hash_map<std::string, std::string>& gt_pd_new_matchings,
       const absl::flat_hash_map<std::string, int>& gt_map);
 

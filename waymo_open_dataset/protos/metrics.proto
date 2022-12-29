@@ -261,6 +261,9 @@ message TrackingMeasurement {
 
   // The score cutoff used to compute this measurement.
   optional float score_cutoff = 7;
+  optional int32 early_t = 8;
+  optional int32 wrong_asso = 9;
+  optional int32 late_t = 10;
 }
 
 message TrackingMeasurements {
@@ -287,4 +290,8 @@ message TrackingMetrics {
   optional Breakdown breakdown = 7;
   // Raw measurements.
   optional TrackingMeasurements measurements = 8;
+  optional int32 early_t = 9;
+  optional int32 wrong_asso = 10;
+  optional int32 late_t = 11;
+  optional int32 num_gts = 12;
 }

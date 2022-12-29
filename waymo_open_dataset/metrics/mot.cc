@@ -18,6 +18,7 @@ limitations under the License.
 #include <memory>
 #include <utility>
 #include <vector>
+#include <tuple>
 
 #include <glog/logging.h>
 #include "absl/container/flat_hash_map.h"
@@ -109,9 +110,13 @@ void MOT::Eval(Matcher* matcher_ptr, Label::DifficultyLevel difficulty_level) {
                                   match_result.num_fns_above_difficulty_level);
   measurement_.set_num_matches(measurement_.num_matches() + num_matches);
 
-  const int num_mismatches = ComputeNumMismatches(gt_pd_new_matchings, gt_map);
-  measurement_.set_num_mismatches(measurement_.num_mismatches() +
-                                  num_mismatches);
+  int num_mismatches, early_t, wrong_asso, late_t;
+  std::tie(num_mismatches, early_t, wrong_asso, late_t) = ComputeNumMismatches(gt_pd_new_matchings, gt_map);
+
+  measurement_.set_num_mismatches(measurement_.num_mismatches() + num_mismatches);
+  measurement_.set_early_t(measurement_.early_t() + early_t);
+  measurement_.set_wrong_asso(measurement_.wrong_asso() + wrong_asso);
+  measurement_.set_late_t(measurement_.late_t() + late_t);
 
   // Update M_{t} and repeat.
   std::vector<std::string> gt_to_evict;
@@ -240,7 +245,7 @@ MOT::MatchResult MOT::Match(const absl::flat_hash_map<std::string, int>& pd_map,
   return result;
 }
 
-int MOT::ComputeNumMismatches(
+std::tuple<int, int, int, int> MOT::ComputeNumMismatches(
     const absl::flat_hash_map<std::string, std::string>& gt_pd_new_matchings,
     const absl::flat_hash_map<std::string, int>& gt_map) {
   // To maintain 1-1 mapping property. New matches might evict some old
@@ -249,6 +254,9 @@ int MOT::ComputeNumMismatches(
   // t0: o1->h1, o2->h2
   // t1: o1->h2,
   int num_mismatches = 0;
+  int early_t = 0;
+  int late_t = 0;
+  int wrong_asso = 0;
   // If a correspondence (o_i, h_k) is made that contradicts a mapping (o_i,
   // h_j) in M_{t−1}, replace (o_i, h_j) with (o_i, h_k) in M_t. Count this as a
   // mismatch error.
@@ -256,6 +264,8 @@ int MOT::ComputeNumMismatches(
     auto git = gt_pd_matchings_.find(kv.first);
     if (git != gt_pd_matchings_.end() && git->second != kv.second) {
       ++num_mismatches;
+      if (pd_gt_matchings_.find(kv.second) == pd_gt_matchings_.end()) ++early_t; // real early termination should also meet that git->second not in current pds.
+      else ++wrong_asso;
     }
     // If a prediction is matched to a ground truth and it was matched to
     // another ground-truth, AND that ground truth is not in the latest frame,
@@ -275,9 +285,10 @@ int MOT::ComputeNumMismatches(
         // the latest frame.
         gt_pd_new_matchings.find(pit->second) == gt_pd_new_matchings.end()) {
       ++num_mismatches;
+      ++late_t;
     }
   }
-  return num_mismatches;
+  return std::make_tuple(num_mismatches, early_t, wrong_asso, late_t);
 }
 
 }  // namespace open_dataset
