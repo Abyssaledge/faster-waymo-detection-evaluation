@@ -219,9 +219,9 @@ void CameraModel::PrepareProjection(const CameraImage& camera_image) {
     global_shutter_state_ = absl::make_unique<GlobalShutterState>();
   }
   global_shutter_state_->vehicle_tfm_cam = vehicle_tfm_cam;
-  global_shutter_state_->n_tfm_cam0 = n_tfm_vehicle0 * vehicle_tfm_cam;
+  global_shutter_state_->n_tfm_cam0 = n_tfm_vehicle0 * vehicle_tfm_cam; // fan: cam to world
   global_shutter_state_->cam_tfm_n =
-      global_shutter_state_->n_tfm_cam0.inverse();
+      global_shutter_state_->n_tfm_cam0.inverse(); // fan: world to cam
 
   if (calibration_.rolling_shutter_direction() ==
       CameraCalibration::GLOBAL_SHUTTER) {

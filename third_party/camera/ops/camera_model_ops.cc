@@ -28,6 +28,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ==============================================================================*/
 
 #include <glog/logging.h>
+#include <thread>
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -93,13 +94,14 @@ void ParseInput(const Input& input, co::CameraCalibration* calibration_ptr,
   calibration.set_height(input.metadata->vec<int32>()(1));
   calibration.set_rolling_shutter_direction(
       static_cast<co::CameraCalibration::RollingShutterReadOutDirection>(
-          input.metadata->vec<int32>()(2)));
+          input.metadata->vec<int32>()(2)));// fan: should be dataset_pb2.CameraCalibration.GLOBAL_SHUTTER, which is 5.
   CHECK_EQ(input.camera_image_metadata->dim_size(0), kCameraImageMedataLen);
   int idx = 0;
   const auto& cim = input.camera_image_metadata->vec<T>();
   for (; idx < 16; ++idx) {
     image.mutable_pose()->add_transform(cim(idx));
   }
+  // the following parameters are all zeros in practice.
   image.mutable_velocity()->set_v_x(cim(idx++));
   image.mutable_velocity()->set_v_y(cim(idx++));
   image.mutable_velocity()->set_v_z(cim(idx++));
@@ -111,6 +113,25 @@ void ParseInput(const Input& input, co::CameraCalibration* calibration_ptr,
   image.set_camera_trigger_time(cim(idx++));
   image.set_camera_readout_done_time(cim(idx++));
 }
+
+template <typename T>
+void WorldToImagePerThread(const Input& input, Tensor& image_coordinates, co::CameraModel& model, const int left, const int right, const int out_channel, const bool return_depth_) {
+    for (int i = left; i < right; ++i) {
+      double u_d = 0.0;
+      double v_d = 0.0;
+      double depth = 0.0;
+      const bool valid = model.WorldToImageWithDepth(
+          input.input_coordinate->matrix<T>()(i, 0),
+          input.input_coordinate->matrix<T>()(i, 1),
+          input.input_coordinate->matrix<T>()(i, 2),
+          /*check_image_bounds=*/false, &u_d, &v_d, &depth);
+      image_coordinates.matrix<T>()(i, 0) = u_d;
+      image_coordinates.matrix<T>()(i, 1) = v_d;
+      if (return_depth_) image_coordinates.matrix<T>()(i, 2) = depth;
+      image_coordinates.matrix<T>()(i, out_channel - 1) = static_cast<T>(valid);
+    }
+}
+
 
 template <typename T>
 class WorldToImageOp : public OpKernel {
@@ -140,20 +161,30 @@ class WorldToImageOp : public OpKernel {
     const int out_channel = 3 + return_depth_;
     CHECK_EQ(3, input.input_coordinate->dim_size(1));
     Tensor image_coordinates(GetTensorflowType<T>(), {num_points, out_channel});
-    for (int i = 0; i < num_points; ++i) {
-      double u_d = 0.0;
-      double v_d = 0.0;
-      double depth = 0.0;
-      const bool valid = model.WorldToImageWithDepth(
-          input.input_coordinate->matrix<T>()(i, 0),
-          input.input_coordinate->matrix<T>()(i, 1),
-          input.input_coordinate->matrix<T>()(i, 2),
-          /*check_image_bounds=*/false, &u_d, &v_d, &depth);
-      image_coordinates.matrix<T>()(i, 0) = u_d;
-      image_coordinates.matrix<T>()(i, 1) = v_d;
-      if (return_depth_) image_coordinates.matrix<T>()(i, 2) = depth;
-      image_coordinates.matrix<T>()(i, out_channel - 1) = static_cast<T>(valid);
+    // for (int i = 0; i < num_points; ++i) {
+    //   double u_d = 0.0;
+    //   double v_d = 0.0;
+    //   double depth = 0.0;
+    //   const bool valid = model.WorldToImageWithDepth(
+    //       input.input_coordinate->matrix<T>()(i, 0),
+    //       input.input_coordinate->matrix<T>()(i, 1),
+    //       input.input_coordinate->matrix<T>()(i, 2),
+    //       /*check_image_bounds=*/false, &u_d, &v_d, &depth);
+    //   image_coordinates.matrix<T>()(i, 0) = u_d;
+    //   image_coordinates.matrix<T>()(i, 1) = v_d;
+    //   if (return_depth_) image_coordinates.matrix<T>()(i, 2) = depth;
+    //   image_coordinates.matrix<T>()(i, out_channel - 1) = static_cast<T>(valid);
+    // }
+    int thread_num = 64;
+    std::vector<std::thread> threads(thread_num);
+    int per_len = (num_points - 1) / thread_num + 1; // up div
+    for(int idx = 0; idx < thread_num; idx++){
+      int left = std::min(per_len * idx, num_points);
+      int right = std::min(per_len * (idx + 1), num_points);
+      // threads[idx] = std::thread(&WorldToImagePerThread, std::cref(input), std::cref(image_coordinates), std::cref(model), left, right, out_channel, return_depth_);
+      threads[idx] = std::thread(&WorldToImagePerThread<T>, std::cref(input), std::ref(image_coordinates), std::ref(model), left, right, out_channel, return_depth_);
     }
+    std::for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
     ctx->set_output(0, image_coordinates);
   }
 
